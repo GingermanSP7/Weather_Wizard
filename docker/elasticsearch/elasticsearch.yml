@@ -1,0 +1,7 @@
+cluster.name: "elastic-cluster"
+# network.host: 0.0.0.0
+network.host: 20.0.0.9
+http.port: 9200
+discovery.seed_hosts: []
+discovery.seed_providers: settings
+

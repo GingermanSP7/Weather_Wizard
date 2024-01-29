@@ -1,0 +1,164 @@
+version: latest
+name: weather_wizard
+
+networks:
+  mynetwork:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 20.0.0.0/24 
+
+services:
+  spring-boot:
+    image: springboot
+    container_name: springboot
+    build: "./WeatherWizard/"
+    ports:
+      - 8080:8080
+    networks:
+      mynetwork:
+        ipv4_address: 20.0.0.2
+
+  fluentd:
+    image: fluentd
+    container_name: fluentd
+    build: "./docker/fluentd"
+    ports:
+      - 8081:8081
+    networks:
+      mynetwork:
+        ipv4_address: 20.0.0.3
+    depends_on:
+      - spring-boot
+    volumes:
+      - /tmp/fluentd/
+
+  zookeeper:
+    image: zookeeper
+    container_name: zookeeper
+    build: "./docker/kafka"
+    networks:
+      mynetwork:
+        ipv4_address: 20.0.0.4
+    command: > 
+      bash -c "set -v
+               mkdir -p /tmp/zookeeper
+               cd /opt/kafka
+               zookeeper-server-start.sh config/zookeeper.properties"
+    ports:
+      - 2181:2181
+
+  kafka:
+    image: kafka_server
+    container_name: kafka_server
+    build: "./docker/kafka"
+    depends_on: 
+      - zookeeper
+    networks:
+      mynetwork:
+        ipv4_address: 20.0.0.5
+    command: > 
+      bash -c "set -v
+              mkdir -p /tmp/zookeeper
+              cd /opt/kafka/
+              kafka-server-start.sh config/server.properties"
+    ports:
+      - 9092:9092
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui
+    container_name: kafkaUI
+    depends_on:
+      - zookeeper
+      - kafka
+    networks:
+      mynetwork:
+        ipv4_address: 20.0.0.6
+    environment:
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS = 20.0.0.5:9092
+      - KAFKA_CLUSTERS_0_ZOOKEEPER = 20.0.0.4:2181
+    ports:
+      - 8082:8080
+
+  kafka-stream:
+    image: kafka_stream
+    container_name: kafka_stream
+    build: "./KafkaStreamModule/"
+    depends_on:
+      - zookeeper
+      - kafka
+    networks:
+      mynetwork:
+        ipv4_address: 20.0.0.7
+    ports:
+      - 8083:8083
+
+  elasticsearch:
+    image: elasticsearch
+    container_name: elasticsearch
+    build: "./docker/elasticsearch"
+    networks:
+      mynetwork:
+        ipv4_address: 20.0.0.9
+    ports:
+      - 9200:9200
+      - 9300:9300
+    environment:
+      - node.name=elasticsearch
+      - xpack.security.enabled=false
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - cluster.routing.allocation.disk.threshold_enabled=false 
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+
+  kibana:
+    image: kibana
+    container_name: kibana
+    build: "./docker/kibana"
+    depends_on:
+      - elasticsearch
+    networks:
+      mynetwork:
+        ipv4_address: 20.0.0.10
+    ports:
+      - 5601:5601
+
+  jupyter:
+    image: jupyter
+    container_name: jupyter_server
+    build: "./docker/jupyter"
+    networks:
+      mynetwork:
+        ipv4_address: 20.0.0.11
+    ports:
+      - 8888:8888
+
+  spark-streaming:
+    image: spark_streaming
+    container_name: spark_streaming
+    build: "./SparkStreamingModule/"
+    depends_on:
+      - zookeeper
+      - kafka
+      - kafka-stream
+      - elasticsearch
+    networks:
+      mynetwork:
+        ipv4_address: 20.0.0.8
+    ports:
+      - 8084:8084
+    command: >
+      java
+        --add-exports=java.base/sun.nio.ch=ALL-UNNAMED
+        --add-opens=java.base/java.lang=ALL-UNNAMED
+        --add-opens=java.base/java.lang.reflect=ALL-UNNAMED
+        --add-opens=java.base/java.io=ALL-UNNAMED
+        --add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED
+        --add-exports java.base/sun.util.calendar=ALL-UNNAMED
+        -jar SparkStreamingModule-0.0.1-SNAPSHOT.jar
+
+  
